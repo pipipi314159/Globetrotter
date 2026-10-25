@@ -54,24 +54,50 @@ namespace Globetrotter {
 
         private delegate IntPtr ShowTreasureMapDelegate(IntPtr manager, ushort rowId, ushort subRowId, byte a4);
 
-        private readonly Hook<HandleActorControlSelfDelegate> _acsHook;
-        private readonly Hook<ShowTreasureMapDelegate> _showMapHook;
+        private readonly Hook<HandleActorControlSelfDelegate>? _acsHook;
+        private readonly Hook<ShowTreasureMapDelegate>? _showMapHook;
+
+        // TW: 依序嘗試國際服 7.3 與 7.0–7.2 的特徵碼，台服遊戲版本較舊時可對上舊版
+        private static readonly string[] AcsSigs = {
+            "48 89 5C 24 ?? 48 89 6C 24 ?? 48 89 74 24 ?? 57 41 56 41 57 48 83 EC 30 33 FF 48 8B D9",
+        };
+
+        private static readonly string[] ShowMapSigs = {
+            "E8 ?? ?? ?? ?? 40 84 F6 0F 85 ?? ?? ?? ?? 48 8B 0D ?? ?? ?? ??",
+            "E8 ?? ?? ?? ?? 40 84 FF 0F 85 ?? ?? ?? ?? 48 8B 0D",
+        };
+
+        private IntPtr TryScan(string name, string[] sigs) {
+            foreach (var sig in sigs) {
+                if (this.Plugin.SigScanner.TryScanText(sig, out var ptr)) {
+                    Plugin.Log.Info($"[TW] {name} 特徵碼命中：{sig}");
+                    return ptr;
+                }
+            }
+
+            Plugin.Log.Warning($"[TW] {name} 特徵碼全部找不到，此功能停用");
+            return IntPtr.Zero;
+        }
 
         public TreasureMaps(Plugin plugin) {
             this.Plugin = plugin;
 
-            var acsPtr = this.Plugin.SigScanner.ScanText("48 89 5C 24 ?? 48 89 6C 24 ?? 48 89 74 24 ?? 57 41 56 41 57 48 83 EC 30 33 FF 48 8B D9");
-            this._acsHook = this.Plugin.GameInteropProvider.HookFromAddress<HandleActorControlSelfDelegate>(acsPtr, this.OnACS);
-            this._acsHook.Enable();
+            var acsPtr = this.TryScan("ActorControlSelf", AcsSigs);
+            if (acsPtr != IntPtr.Zero) {
+                this._acsHook = this.Plugin.GameInteropProvider.HookFromAddress<HandleActorControlSelfDelegate>(acsPtr, this.OnACS);
+                this._acsHook.Enable();
+            }
 
-            var showMapPtr = this.Plugin.SigScanner.ScanText("E8 ?? ?? ?? ?? 40 84 F6 0F 85 ?? ?? ?? ?? 48 8B 0D ?? ?? ?? ??");
-            this._showMapHook = this.Plugin.GameInteropProvider.HookFromAddress<ShowTreasureMapDelegate>(showMapPtr, this.OnShowMap);
-            this._showMapHook.Enable();
+            var showMapPtr = this.TryScan("ShowTreasureMap", ShowMapSigs);
+            if (showMapPtr != IntPtr.Zero) {
+                this._showMapHook = this.Plugin.GameInteropProvider.HookFromAddress<ShowTreasureMapDelegate>(showMapPtr, this.OnShowMap);
+                this._showMapHook.Enable();
+            }
         }
 
         public void Dispose() {
-            this._acsHook.Dispose();
-            this._showMapHook.Dispose();
+            this._acsHook?.Dispose();
+            this._showMapHook?.Dispose();
         }
 
         public void OnHover(object? sender, ulong id) {
@@ -91,7 +117,7 @@ namespace Globetrotter {
                 Plugin.Log.Error(ex, "Exception on show map");
             }
 
-            return this._showMapHook.Original(manager, rowId, subRowId, a4);
+            return this._showMapHook!.Original(manager, rowId, subRowId, a4);
         }
 
         private bool OnShowMapInner(ushort rowId, ushort subRowId) {
@@ -119,7 +145,7 @@ namespace Globetrotter {
                 Plugin.Log.Error(ex, "Exception on ACS");
             }
 
-            return this._acsHook.Original(a1, a2, dataPtr);
+            return this._acsHook!.Original(a1, a2, dataPtr);
         }
 
         private void OnACSInner(IntPtr dataPtr) {

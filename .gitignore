@@ -363,3 +363,6 @@ FodyWeavers.xsd
 
 # Rider
 .idea/
+
+# TW port: local build log (contains local paths)
+build.log
